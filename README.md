@@ -5,6 +5,7 @@ PoC de um fluxo PIX em que o cliente tem sensação síncrona, mas todo o back-e
 ![Rota HTTP GET /events SSE no gateway Deno](images/img-3.png)
 ![Rota HTTP POST /pix no gateway Deno - Request](images/img-4.png)
 ![Rota HTTP POST /pix no gateway Deno - Response](images/img-5.png)
+![Tópicos Kafka](images/img-6.png)
 
 ## Arquitetura
 - **Front web (React POC)**: formulário para enviar um PIX e escutar eventos via SSE. No Compose há um Nginx que serve os arquivos estáticos e faz proxy de `/pix` e `/events` para o gateway Deno.
@@ -64,3 +65,7 @@ A página estática fica em `web/`. No Docker Compose, acesse http://localhost:4
 - No Compose o `backend-consumer` roda `bundle exec karafka topics create` antes do `karafka server` para garantir que `pix_requests` e `pix_responses` existam antes de consumir.
 - O bridge de respostas loga cada publicação no JetStream (`[pix] published to NATS JS subject=...`). Se não ver esses logs, confira `backend-consumer`.
 - O `docker-compose.yml` inclui healthchecks para Zookeeper/Kafka; `backend-*` só sobe quando o broker está saudável, evitando erros de `Connect ... refused`.
+
+
+## Artigos relacionados
+- https://medium.com/@denis.volokh/exploring-deno-sse-and-nats-through-a-real-time-crypto-correlation-dashboard-fc4192488e7c
