@@ -2,6 +2,9 @@ PoC de um fluxo PIX em que o cliente tem sensação síncrona, mas todo o back-e
 
 ![Fluxo da solução](images/img-1.png)
 ![Interface web do PIX síncrono](images/img-2.png)
+![Rota HTTP GET /events SSE no gateway Deno](images/img-3.png)
+![Rota HTTP POST /pix no gateway Deno - Request](images/img-4.png)
+![Rota HTTP POST /pix no gateway Deno - Response](images/img-5.png)
 
 ## Arquitetura
 - **Front web (React POC)**: formulário para enviar um PIX e escutar eventos via SSE. No Compose há um Nginx que serve os arquivos estáticos e faz proxy de `/pix` e `/events` para o gateway Deno.
