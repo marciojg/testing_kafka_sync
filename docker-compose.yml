@@ -1,0 +1,145 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    container_name: pix-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc -w 2 127.0.0.1 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: pix-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: pix-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      - zookeeper
+      - kafka
+
+  nats:
+    image: nats:2.10
+    container_name: pix-nats
+    restart: unless-stopped
+    command: -js -DV # https://docs.nats.io/running-a-nats-service/introduction/running#jetstream
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+
+  backend-api:
+    build:
+      context: ./backend
+    tty: true
+    stdin_open: true
+    image: pix-backend:latest
+    container_name: pix-backend-api
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    networks:
+      default:
+        aliases:
+          - backend-api
+          - pix-backend-api
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      NATS_URL: nats://nats:4222
+      API_PORT: 4000
+    ports:
+      - "4000:4000"
+    command: ["bundle", "exec", "rackup", "--host", "0.0.0.0", "--port", "4000"]
+
+  backend-consumer:
+    build:
+      context: ./backend
+    image: pix-backend:latest
+    container_name: pix-backend-consumer
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    depends_on:
+      kafka:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      backend-api:
+        condition: service_started
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      NATS_URL: nats://nats:4222
+    command: ["sh", "-c", "bundle exec karafka topics create && bundle exec karafka server"]
+
+  deno:
+    build:
+      context: .
+      dockerfile: deno-sse/Dockerfile
+    container_name: pix-deno
+    restart: unless-stopped
+    depends_on:
+      - nats
+      - backend-api
+    networks:
+      default:
+        aliases:
+          - deno
+          - pix-deno
+    environment:
+      NATS_URL: nats://nats:4222
+      BACKEND_URL: http://backend-api:4000
+      PORT: 8000
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    container_name: pix-web
+    restart: unless-stopped
+    depends_on:
+      - deno
+    networks:
+      default:
+        aliases:
+          - web
+    ports:
+      - "4173:80"
+
+networks:
+  default:
+    name: pix-sync

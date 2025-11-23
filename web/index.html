@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Experiência PIX síncrona</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+          sans-serif;
+        background: #030712;
+        color: #f8fafc;
+      }
+      body {
+        margin: 0;
+      }
+      .hero {
+        min-height: 100vh;
+        background: radial-gradient(circle at top, #0f172a, #020617 55%);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 2rem;
+      }
+      .surface {
+        width: min(960px, 100%);
+        display: grid;
+        gap: 1.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(148, 163, 184, 0.1);
+        border-radius: 24px;
+        padding: 2rem;
+        box-shadow: 0 30px 120px rgba(15, 23, 42, 0.65);
+        backdrop-filter: blur(20px);
+      }
+
+      h1 {
+        font-size: clamp(1.5rem, 2vw + 1rem, 2.4rem);
+        margin-bottom: 0.25rem;
+      }
+      p {
+        color: #cbd5f5;
+        margin-top: 0;
+      }
+
+      label {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        margin-bottom: 0.25rem;
+      }
+      input,
+      textarea {
+        width: 100%;
+        padding: 0.9rem;
+        border-radius: 14px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(15, 23, 42, 0.6);
+        color: inherit;
+      }
+      input:focus,
+      textarea:focus {
+        outline: 1px solid #22d3ee;
+      }
+      button {
+        background: linear-gradient(120deg, #22c55e, #14b8a6);
+        border: none;
+        color: #021017;
+        padding: 0.9rem 1.2rem;
+        border-radius: 14px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+        transition: transform 150ms, box-shadow 150ms;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      button:not(:disabled):hover {
+        transform: translateY(-1px);
+        box-shadow: 0 15px 35px rgba(34, 197, 94, 0.35);
+      }
+
+      .panel {
+        background: rgba(2, 6, 23, 0.6);
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        border-radius: 20px;
+        padding: 1.5rem;
+      }
+      .timeline {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        max-height: 320px;
+        overflow: auto;
+        font-family: "JetBrains Mono", "Fira Code", monospace;
+        font-size: 0.85rem;
+      }
+      .timeline li {
+        display: flex;
+        gap: 0.75rem;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+      }
+      .timeline li:last-child {
+        border-bottom: none;
+      }
+      .pill {
+        border-radius: 999px;
+        padding: 0.2rem 0.6rem;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .pill.success {
+        background: rgba(16, 185, 129, 0.15);
+        color: #34d399;
+      }
+      .pill.error {
+        background: rgba(248, 113, 113, 0.15);
+        color: #fb7185;
+      }
+      .pill.info {
+        background: rgba(129, 140, 248, 0.15);
+        color: #a5b4fc;
+      }
+      .stat {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .stat span:first-child {
+        font-size: 0.8rem;
+        color: #94a3b8;
+      }
+      .stat strong {
+        font-size: 1.4rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import { h, render } from "https://esm.sh/preact@10.19.3";
+      import { useEffect, useMemo, useRef, useState } from "https://esm.sh/preact@10.19.3/hooks";
+      import htm from "https://esm.sh/htm@3.1.1";
+      const html = htm.bind(h);
+
+      const apiBase = window.location.origin;
+
+      function App() {
+        const [clientId, setClientId] = useState(() => crypto.randomUUID());
+        const [form, setForm] = useState({
+          payer: "Cliente A",
+          payee: "Loja B",
+          amount: 52.75,
+          description: "Compra no app",
+        });
+        const [timeline, setTimeline] = useState([]);
+        const [sending, setSending] = useState(false);
+        const [status, setStatus] = useState("Pronto para enviar");
+        const [lastLatency, setLastLatency] = useState(null);
+        const [elapsed, setElapsed] = useState(0);
+        const [startedAt, setStartedAt] = useState(null);
+        const [lastRequestId, setLastRequestId] = useState(null);
+        const sourceRef = useRef(null);
+        const [sseActive, setSseActive] = useState(false);
+        const lastRequestIdRef = useRef(null);
+        const startedAtRef = useRef(null);
+
+        useEffect(() => {
+          lastRequestIdRef.current = lastRequestId;
+        }, [lastRequestId]);
+
+        useEffect(() => {
+          startedAtRef.current = startedAt;
+        }, [startedAt]);
+
+        useEffect(() => {
+          return () => {
+            if (sourceRef.current) {
+              sourceRef.current.close();
+              sourceRef.current = null;
+            }
+          };
+        }, []);
+
+        useEffect(() => {
+          if (!startedAt) {
+            if (lastLatency !== null) setElapsed(lastLatency);
+            return;
+          }
+          const id = setInterval(() => {
+            setElapsed(Math.round((Date.now() - startedAt) / 10) / 100);
+          }, 100);
+          return () => clearInterval(id);
+        }, [startedAt, lastLatency]);
+
+        async function handleSubmit(event) {
+          event.preventDefault();
+          startSseStream(clientId);
+          setSending(true);
+          setStatus("Processando...");
+          setStartedAt(Date.now());
+          setElapsed(0);
+          setLastLatency(null);
+          pushEvent({
+            label: "Envio HTTP",
+            detail: "POST /pix enviado ao backend",
+            tone: "info",
+          });
+
+          try {
+            const res = await fetch(`${apiBase}/pix`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...form, clientId }),
+            });
+            const text = await res.text();
+            let data;
+            try {
+              data = JSON.parse(text);
+            } catch {
+              data = { ok: false, error: "Resposta não JSON", body: text };
+            }
+            setLastRequestId(data.requestId ?? null);
+
+            if (res.ok) {
+              pushEvent({
+                label: "Backend aceitou",
+                detail: JSON.stringify(data),
+                tone: "success",
+              });
+            } else {
+              pushEvent({
+                label: "Erro HTTP",
+                detail: JSON.stringify(data),
+                tone: "error",
+              });
+              setStatus("Erro no envio");
+              setStartedAt(null);
+            }
+          } catch (error) {
+            pushEvent({
+              label: "Falha de rede",
+              detail: String(error),
+              tone: "error",
+            });
+            setStatus("Erro de rede");
+            setStartedAt(null);
+          } finally {
+            setSending(false);
+          }
+        }
+
+        function pushEvent(entry) {
+          setTimeline((prev) =>
+            [
+              { id: crypto.randomUUID(), at: new Date().toISOString(), ...entry },
+              ...prev,
+            ].slice(0, 20)
+          );
+        }
+
+        function startSseStream(id) {
+          stopSseStream();
+          const source = new EventSource(`${apiBase}/events?clientId=${id}`);
+          sourceRef.current = source;
+          setSseActive(true);
+          pushEvent({
+            label: "SSE iniciado",
+            detail: `Escutando updates para ${id.slice(0, 8)}`,
+            tone: "info",
+          });
+          source.onmessage = (ev) => {
+            try {
+              const data = JSON.parse(ev.data);
+              handleSsePayload(data);
+            } catch {
+              pushEvent({
+                label: "SSE erro",
+                detail: `Resposta inválida: ${ev.data}`,
+                tone: "error",
+              });
+              stopSseStream("Resposta SSE inválida");
+            }
+          };
+          source.onerror = () => {
+            finalizeElapsed();
+            const startTs = startedAtRef.current;
+            const finalElapsed = Math.round((Date.now() - startTs) / 10) / 100;
+            setLastLatency(finalElapsed);
+            setStatus("PIX inconclusivo");
+            setStartedAt(null);
+            stopSseStream("Conexão SSE encerrada pelo servidor");
+          };
+        }
+
+        function stopSseStream(reason) {
+          const isSuccess = reason === "Fluxo concluído";
+          if (sourceRef.current) {
+            sourceRef.current.close();
+            sourceRef.current = null;
+            setSseActive(false);
+            if (reason) {
+              pushEvent({
+                label: "SSE encerrado",
+                detail: reason,
+                tone: isSuccess ? "success" : "error",
+              });
+            }
+          }
+        }
+
+        function handleSsePayload(evt) {
+          if (evt.type === "connected") {
+            pushEvent({
+              label: "SSE pronto",
+              detail: `Cliente ${evt.clientId?.slice?.(0, 8) ?? ""} conectado`,
+              tone: "info",
+            });
+            return;
+          }
+          if (evt.type === "info") {
+            pushEvent({
+              label: "SSE",
+              detail: evt.message ?? JSON.stringify(evt),
+              tone: "info",
+            });
+            return;
+          }
+          if (evt.type === "timeout" || evt.type === "error") {
+            finalizeElapsed();
+            stopSseStream(evt.error ?? "Conexão encerrada");
+            return;
+          }
+          if (evt.type === "pix:update" && evt.data) {
+            pushEvent({
+              label: `Atualização ${evt.data.status ?? ""}`.trim(),
+              detail: JSON.stringify(evt.data),
+              tone: evt.data.status === "done" ? "success" : "info",
+            });
+            const expected = lastRequestIdRef.current;
+            const startTs = startedAtRef.current;
+            if (
+              evt.data.status === "done" &&
+              expected &&
+              evt.data.correlationId === expected &&
+              startTs
+            ) {
+              finalizeElapsed();
+              const finalElapsed = Math.round((Date.now() - startTs) / 10) / 100;
+              setLastLatency(finalElapsed);
+              setStatus("PIX concluído");
+              setStartedAt(null);
+              stopSseStream("Fluxo concluído");
+            }
+            return;
+          }
+          pushEvent({
+            label: "SSE evento",
+            detail: JSON.stringify(evt),
+            tone: "info",
+          });
+        }
+
+        function finalizeElapsed() {
+          if (startedAtRef.current) {
+            const diff = Math.round((Date.now() - startedAtRef.current) / 10) / 100;
+            setElapsed(diff);
+          }
+        }
+
+        return html`
+          <section class="hero">
+            <div class="surface">
+              <div>
+                <h1>Experiência PIX quase síncrona</h1>
+                <p>
+                  Clique em <strong>Enviar PIX</strong> e acompanhe cada etapa:
+                  requisição HTTP, processamento no Kafka e retorno via SSE.
+                </p>
+
+                <div class="panel" style="margin-bottom: 1rem">
+                  <div style="display: flex; gap: 1rem">
+                    <div class="stat">
+                      <span>Status atual</span>
+                      <strong>${status}</strong>
+                    </div>
+                    <div class="stat">
+                      <span>Tempo decorrido</span>
+                      <strong>${startedAt ? `${elapsed.toFixed(2)}s` : lastLatency ? `${lastLatency}s` : "---"}</strong>
+                    </div>
+                    <div class="stat">
+                      <span>Último round-trip</span>
+                      <strong>${lastLatency ? `${lastLatency}s` : "Envie um PIX"}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="panel">
+                  <form onSubmit=${handleSubmit} style="display: grid; gap: 0.85rem">
+                    <div>
+                      <label>Client ID (SSE)</label>
+                      <input
+                        value=${clientId}
+                        onInput=${(e) => setClientId(e.target.value)}
+                        spellcheck=${false}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label>Pagador</label>
+                      <input
+                        value=${form.payer}
+                        onInput=${(e) => setForm({ ...form, payer: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label>Recebedor</label>
+                      <input
+                        value=${form.payee}
+                        onInput=${(e) => setForm({ ...form, payee: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label>Valor (BRL)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value=${form.amount}
+                        onInput=${(e) =>
+                          setForm({ ...form, amount: Number(e.target.value) })
+                        }
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label>Descrição</label>
+                      <textarea
+                        rows="2"
+                        value=${form.description}
+                        onInput=${(e) =>
+                          setForm({ ...form, description: e.target.value })
+                        }
+                      ></textarea>
+                    </div>
+                    <button type="submit" disabled=${sending}>
+                      ${sending ? "Enviando..." : "Enviar PIX"}
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              <div class="panel">
+                <h3>Linha do tempo</h3>
+                <p style="font-size: 0.9rem">
+                  Eventos recentes do pipeline (máx. 20 itens).
+                </p>
+                <ul class="timeline">
+                  ${timeline.length === 0 &&
+                  html`<li>
+                    <div class="pill info">INFO</div>
+                    <div>
+                      <strong>Comece enviando um PIX</strong>
+                      <div>Cada etapa aparecerá aqui para demonstrar a experiência.</div>
+                    </div>
+                  </li>`}
+                  ${timeline.map(
+                    (item) => html`<li key=${item.id}>
+                      <div class="pill ${item.tone ?? "info"}">
+                        ${(item.tone ?? "info").toUpperCase()}
+                      </div>
+                      <div>
+                        <strong>${item.label}</strong>
+                        <div style="color: #94a3b8; font-size: 0.8rem">
+                          ${new Date(item.at).toLocaleTimeString()}
+                        </div>
+                        <div style="white-space: pre-wrap">${item.detail}</div>
+                      </div>
+                    </li>`
+                  )}
+                </ul>
+              </div>
+            </div>
+          </section>
+        `;
+      }
+
+      const root = document.getElementById("root");
+      render(html`<${App} />`, root);
+    </script>
+  </body>
+</html>
